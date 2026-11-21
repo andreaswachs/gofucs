@@ -233,3 +233,88 @@ func BenchmarkMapHeavyMedium(b *testing.B)           { benchMapHeavy(b, sizeMedi
 func BenchmarkMapHeavyLarge(b *testing.B)            { benchMapHeavy(b, sizeLarge) }
 func BenchmarkMapConcurrentHeavyMedium(b *testing.B) { benchMapConcurrentHeavy(b, sizeMedium) }
 func BenchmarkMapConcurrentHeavyLarge(b *testing.B)  { benchMapConcurrentHeavy(b, sizeLarge) }
+
+// --- Zero-allocation paths ---
+//
+// The Into variants write into a caller-supplied destination when it has
+// enough capacity, so these benchmarks reuse one destination and should
+// report 0 allocs/op (sequential paths).
+
+// intoSinkSlice is a distinct typed sink so the Into results cannot be
+// optimized away, without paying for interface boxing in the measured loop.
+var intoSinkSlice []int
+
+func benchFromSliceCollect(b *testing.B, n int) {
+	items := makeInts(n)
+	b.ReportAllocs()
+	b.SetBytes(int64(n * 8))
+	b.ResetTimer()
+	for range b.N {
+		intoSinkSlice = fucs.FromSlice(items).Collect()
+	}
+}
+
+func BenchmarkFromSliceCollect(b *testing.B) { benchFromSliceCollect(b, sizeMedium) }
+
+func benchMapIntoReuse(b *testing.B, n int) {
+	items := makeInts(n)
+	dst := make([]int, n)
+	b.ReportAllocs()
+	b.SetBytes(int64(n * 8))
+	b.ResetTimer()
+	for range b.N {
+		intoSinkSlice = fucs.FromSlice(items).MapInto(dst, intMapFn)
+	}
+}
+
+func BenchmarkMapIntoReuseMedium(b *testing.B) { benchMapIntoReuse(b, sizeMedium) }
+func BenchmarkMapIntoReuseLarge(b *testing.B)  { benchMapIntoReuse(b, sizeLarge) }
+
+func benchFilterIntoReuse(b *testing.B, n int) {
+	items := makeInts(n)
+	pred := func(curr int) bool { return curr%2 == 0 }
+	dst := make([]int, n)
+	b.ReportAllocs()
+	b.SetBytes(int64(n * 8))
+	b.ResetTimer()
+	for range b.N {
+		intoSinkSlice = fucs.FromSlice(items).FilterInto(dst, pred)
+	}
+}
+
+func BenchmarkFilterIntoReuseMedium(b *testing.B) { benchFilterIntoReuse(b, sizeMedium) }
+func BenchmarkFilterIntoReuseLarge(b *testing.B)  { benchFilterIntoReuse(b, sizeLarge) }
+
+// benchFilterInPlace measures the zero-copy in-place filter pattern. The
+// separate buffer is reset with buf[:0] each iteration so compaction reuses
+// the same backing array; the input items are never mutated.
+func benchFilterInPlace(b *testing.B, n int) {
+	items := makeInts(n)
+	pred := func(curr int) bool { return curr%2 == 0 }
+	buf := make([]int, n)
+	b.ReportAllocs()
+	b.SetBytes(int64(n * 8))
+	b.ResetTimer()
+	for range b.N {
+		intoSinkSlice = fucs.FromSlice(items).FilterInto(buf[:0], pred)
+	}
+}
+
+func BenchmarkFilterInPlaceMedium(b *testing.B) { benchFilterInPlace(b, sizeMedium) }
+func BenchmarkFilterInPlaceLarge(b *testing.B)  { benchFilterInPlace(b, sizeLarge) }
+
+// benchMapConcurrentIntoReuse reuses one destination. Per-worker closure
+// allocation may remain, so compare its allocs/op to BenchmarkMapConcurrentLarge
+// rather than expecting exactly zero.
+func benchMapConcurrentIntoReuse(b *testing.B, n int) {
+	items := makeInts(n)
+	dst := make([]int, n)
+	b.ReportAllocs()
+	b.SetBytes(int64(n * 8))
+	b.ResetTimer()
+	for range b.N {
+		intoSinkSlice = fucs.FromSlice(items).MapConcurrentInto(dst, intMapFn)
+	}
+}
+
+func BenchmarkMapConcurrentIntoReuse(b *testing.B) { benchMapConcurrentIntoReuse(b, sizeLarge) }

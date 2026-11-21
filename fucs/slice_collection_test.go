@@ -242,3 +242,146 @@ func TestSliceCollectionEdgeCases(t *testing.T) {
 		assert.Equal(t, 0, reduced)
 	})
 }
+
+// intoSink keeps Into results reachable so the compiler cannot drop them.
+var intoSink []int
+
+func intoAddOne(x int) int  { return x + 1 }
+func intoIsEven(x int) bool { return x%2 == 0 }
+
+func TestIntoAndAllocation(t *testing.T) {
+	t.Run("map_into_reuses_backing_array", func(t *testing.T) {
+		src := []int{1, 2, 3}
+		dst := make([]int, 3, 8)
+
+		got := fucs.FromSlice(src).MapInto(dst, intoAddOne)
+
+		assert.Equal(t, 3, len(got))
+		assert.Equal(t, []int{2, 3, 4}, got)
+		assert.True(t, &dst[0] == &got[0], "MapInto should reuse dst's backing array")
+	})
+
+	t.Run("map_into_allocates_when_capacity_is_low", func(t *testing.T) {
+		src := []int{1, 2, 3}
+		dst := make([]int, 2)
+
+		got := fucs.FromSlice(src).MapInto(dst, intoAddOne)
+
+		assert.Equal(t, []int{2, 3, 4}, got)
+		assert.False(t, &dst[0] == &got[0], "MapInto should grow when cap(dst) < len(src)")
+	})
+
+	t.Run("filter_into_reuses_backing_array", func(t *testing.T) {
+		src := []int{1, 2, 3, 4}
+		dst := make([]int, 4, 8)
+
+		got := fucs.FromSlice(src).FilterInto(dst, intoIsEven)
+
+		assert.Equal(t, 2, len(got))
+		assert.Equal(t, []int{2, 4}, got)
+		assert.True(t, &dst[0] == &got[0], "FilterInto should reuse dst's backing array")
+	})
+
+	t.Run("filter_into_compacts_in_place", func(t *testing.T) {
+		src := []int{1, 2, 3, 4, 5}
+
+		got := fucs.FromSlice(src).FilterInto(src[:0], intoIsEven)
+
+		assert.Equal(t, 2, len(got))
+		assert.Equal(t, []int{2, 4}, got)
+		assert.True(t, &src[0] == &got[0], "in-place FilterInto should write into src")
+	})
+
+	t.Run("filter_into_leaves_input_intact_with_separate_buffer", func(t *testing.T) {
+		src := []int{1, 2, 3, 4}
+		dst := make([]int, 4)
+
+		got := fucs.FromSlice(src).FilterInto(dst, intoIsEven)
+
+		assert.Equal(t, []int{2, 4}, got)
+		assert.Equal(t, []int{1, 2, 3, 4}, src)
+	})
+
+	t.Run("filter_into_allocates_when_capacity_is_low", func(t *testing.T) {
+		src := []int{1, 2, 3, 4}
+		dst := make([]int, 1)
+
+		got := fucs.FromSlice(src).FilterInto(dst, intoIsEven)
+
+		assert.Equal(t, []int{2, 4}, got)
+		assert.False(t, &dst[0] == &got[0], "FilterInto should grow when cap(dst) < len(src)")
+	})
+
+	t.Run("map_concurrent_into_matches_map_and_reuses_buffer", func(t *testing.T) {
+		src := make([]int, 1000)
+		for i := range src {
+			src[i] = i
+		}
+		want := fucs.FromSlice(src).Map(intoAddOne).Collect()
+		dst := make([]int, len(src))
+
+		got := fucs.FromSlice(src).MapConcurrentInto(dst, intoAddOne)
+
+		assert.Equal(t, want, got)
+		assert.True(t, &dst[0] == &got[0], "MapConcurrentInto should reuse dst's backing array")
+	})
+
+	t.Run("map_concurrent_into_empty_collection", func(t *testing.T) {
+		dst := make([]int, 0)
+
+		got := fucs.FromSlice([]int{}).MapConcurrentInto(dst, intoAddOne)
+
+		assert.NotNil(t, got)
+		assert.Empty(t, got)
+	})
+
+	t.Run("map_concurrent_into_singleton_collection", func(t *testing.T) {
+		dst := make([]int, 1)
+
+		got := fucs.FromSlice([]int{41}).MapConcurrentInto(dst, intoAddOne)
+
+		assert.Equal(t, []int{42}, got)
+		assert.True(t, &dst[0] == &got[0], "MapConcurrentInto should reuse dst's backing array")
+	})
+
+	t.Run("from_slice_and_collect_do_not_allocate", func(t *testing.T) {
+		src := make([]int, 100)
+		for i := range src {
+			src[i] = i
+		}
+
+		allocs := testing.AllocsPerRun(100, func() {
+			intoSink = fucs.FromSlice(src).Collect()
+		})
+
+		assert.Equal(t, float64(0), allocs)
+	})
+
+	t.Run("map_into_with_sufficient_buffer_does_not_allocate", func(t *testing.T) {
+		src := make([]int, 100)
+		for i := range src {
+			src[i] = i
+		}
+		dst := make([]int, len(src))
+
+		allocs := testing.AllocsPerRun(100, func() {
+			intoSink = fucs.FromSlice(src).MapInto(dst, intoAddOne)
+		})
+
+		assert.Equal(t, float64(0), allocs)
+	})
+
+	t.Run("filter_into_with_sufficient_buffer_does_not_allocate", func(t *testing.T) {
+		src := make([]int, 100)
+		for i := range src {
+			src[i] = i
+		}
+		dst := make([]int, len(src))
+
+		allocs := testing.AllocsPerRun(100, func() {
+			intoSink = fucs.FromSlice(src).FilterInto(dst, intoIsEven)
+		})
+
+		assert.Equal(t, float64(0), allocs)
+	})
+}
