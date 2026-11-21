@@ -39,6 +39,30 @@ parallel. Results are identical to `Map` and remain ordered. Use it when the
 mapper is CPU-heavy enough to outweigh coordination overhead; for trivial
 mappers sequential `Map` is usually faster.
 
+## Releasing
+
+Pushing to `main` creates the next semver tag automatically. Versions come from
+[Conventional Commits](https://www.conventionalcommits.org/) subjects:
+
+| Commit subject           | Bump                                     |
+| ------------------------ | ---------------------------------------- |
+| `fix:`, `perf:`          | patch                                    |
+| `feat:`                  | minor                                    |
+| `feat!:`, `fix(api)!:`   | major if current major > 0, minor if 0.x |
+| others (`docs:`, `chore:`, `refactor:`, ...) | no release          |
+
+Types are read from the subject only. A `!` before `:` or a `BREAKING CHANGE:`
+/ `BREAKING-CHANGE:` footer in the body marks the change as breaking. When
+several commits are pending, breaking wins over `feat`, which wins over
+`fix`/`perf`.
+
+The first tag is `v0.1.0`; create a tag manually beforehand to start elsewhere.
+To preview locally:
+
+```sh
+bash scripts/next-version.sh
+```
+
 ## Benchmarks
 
 ```sh
